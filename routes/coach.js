@@ -6,5 +6,6 @@ const handleErrorAsync = require('../utils/handleErrorAsync');
 
 router.get('/', handleErrorAsync(coachController.getList))
 router.get('/:coachId', handleErrorAsync(coachController.getDetail))
+router.get('/:coachId/courses', handleErrorAsync(coachController.getCourses))
 
 module.exports = router

@@ -75,4 +75,55 @@ const getDetail = async (req, res, next) => {
   handleSuccess(res, 200, result)
 }
 
-module.exports = { getList, getDetail }
+const getCourses = async (req, res, next) => {
+  const { coachId } = req.params
+
+  if (isUndefined(coachId) || isNotValidString(coachId) || !isNotValidUUID(coachId)) {
+
+    logger.warn('欄位未填寫正確')
+    next(appError(400, '欄位未填寫正確'))
+    return
+  }
+
+  const existCoach = await dataSource.getRepository('Coach').findOne({
+    where: { id: coachId },
+    relations: ['User']
+  })
+
+  if (!existCoach) {
+    logger.warn('找不到該教練')
+    next(appError(400, '找不到該教練'))
+    return
+  }
+
+  const courses = await dataSource.getRepository('Course').find({
+    select: ['id', 'skill_id', 'name', 'description', 'start_at', 'end_at', 'max_participants'],
+    where: { user_id: existCoach.user_id }
+  })
+
+  const courseList = await Promise.all(courses.map(async item => {
+    const startAt = new Date(item.start_at)
+    const endAt = new Date(item.end_at)
+
+    const getSkillName = await dataSource.getRepository('Skill').findOne({
+      select: ['name'],
+      where: { id: item.skill_id }
+    })
+
+    return {
+      id: item.id,
+      coach_name: existCoach.User.name,
+      skill_name: getSkillName.name,
+      name: item.name,
+      description: item.description,
+      start_at: startAt,
+      end_at: endAt,
+      max_participants: item.max_participants
+    }
+  }))
+
+  handleSuccess(res, 200, courseList)
+
+}
+
+module.exports = { getList, getDetail, getCourses }
