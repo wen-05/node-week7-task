@@ -7,6 +7,7 @@ const appError = require('../utils/appError')
 
 const config = require('../config/index')
 const generateJWT = require('../utils/generateJWT')
+const { IsNull } = require('typeorm')
 
 const saltRounds = 10
 
@@ -106,6 +107,47 @@ const login = async (req, res, next) => {
   })
 }
 
+const forgetPassword = async (req, res, next) => {
+  const { id } = req.user
+  const { password, new_password, confirm_new_password } = req.body
+
+  if (isNotValidString(password) || isNotValidString(new_password) || isNotValidString(confirm_new_password)) {
+    return next(appError(400, '欄位未填寫正確'))
+  }
+
+  if (!isValidPassword(password) || !isValidPassword(new_password) || !isValidPassword(confirm_new_password)) {
+    return next(appError(400, '密碼不符合規則，需要包含英文數字大小寫，最短8個字，最長16個字'))
+  }
+
+  if (new_password === password) {
+    return next(appError(400, '新密碼不能與舊密碼相同'))
+  }
+
+  if (new_password !== confirm_new_password) {
+    next(appError(400, '新密碼與驗證新密碼不一致'))
+    return
+  }
+
+  const userRepo = dataSource.getRepository('User')
+  const findUser = await userRepo.findOne({
+    select: ['password'],
+    where: { id }
+  })
+
+  const passwordMatch = await bcrypt.compare(password, findUser.password)
+  if (!passwordMatch) {
+    return next(appError(400, '密碼輸入錯誤'))
+  }
+
+  const hashNewPassword = await bcrypt.hash(new_password, saltRounds)
+  const updateUser = userRepo.update({ id }, { password: hashNewPassword })
+  if (updateUser.affected === 0) {
+    return next(appError(400, '更新密碼失敗'))
+  }
+
+  handleSuccess(res, 200, null)
+}
+
 const getProfile = async (req, res, next) => {
   const { id } = req.user
 
@@ -118,7 +160,7 @@ const getProfile = async (req, res, next) => {
   handleSuccess(res, 200, user)
 }
 
-const updateProfile = async (req, res, next) => {
+const editProfile = async (req, res, next) => {
   const { id } = req.user
   const { name } = req.body
 
@@ -159,4 +201,90 @@ const updateProfile = async (req, res, next) => {
   handleSuccess(res, 200, { user: result })
 }
 
-module.exports = { signup, login, getProfile, updateProfile }
+const getPurchaseCreditPackage = async (req, res, next) => {
+  const { id } = req.user
+  const creditPurchaseRepo = dataSource.getRepository('CreditPurchase')
+  const creditPurchase = await creditPurchaseRepo.find({
+    select: [
+      'purchased_credits',
+      'price_paid',
+      'purchaseAt',
+    ],
+    where: { user_id: id },
+    relations: {
+      CreditPackage: true,
+    }
+  })
+
+  handleSuccess(res, 200, creditPurchase.map(item => (
+    {
+      purchased_credits: item.purchased_credits,
+      price_paid: item.price_paid,
+      name: item.CreditPackage.name,
+      purchase_at: item.purchaseAt,
+    }
+  )))
+}
+
+const getEnrollCourse = async (req, res, next) => {
+  const { id } = req.user
+
+  const creditPurchaseRepo = dataSource.getRepository('CreditPurchase')
+  const courseBookingRepo = dataSource.getRepository('CourseBooking')
+  const userRepo = dataSource.getRepository('User')
+
+  // 總購買堂數
+  const userCreditPurchase = await creditPurchaseRepo.sum('purchased_credits', { user_id: id })
+
+  // 已使用堂數
+  const credit_usage = await courseBookingRepo.count({ user_id: id, cancelledAt: IsNull() })
+
+  // 剩餘堂數
+  const credit_remain = userCreditPurchase - credit_usage
+
+  const courseBookingList = await courseBookingRepo.find({
+    select: ['course_id'],
+    where: { user_id: id },
+    relations: {
+      User: true,
+      Course: true
+    }
+  })
+
+  const now = new Date()
+
+  const course_booking = await Promise.all(courseBookingList.map(async item => {
+    const startAt = new Date(item.Course.start_at)
+    const endAt = new Date(item.Course.end_at)
+
+    let courseStatus = 'PENDING' // 尚未開始
+    if (startAt <= now && endAt >= now) {
+      courseStatus = 'PROGRESS' // 進行中
+    } else if (endAt < now) {
+      courseStatus = 'COMPLETED' // 已結束
+    }
+
+    const getCoachName = await userRepo.findOne({
+      select: ['name'],
+      where: { id: item.Course.user_id }
+    })
+
+    return {
+      name: item.Course.name,
+      course_id: item.course_id,
+      coach_name: getCoachName.name,
+      status: courseStatus,
+      start_at: item.Course.start_at,
+      end_at: item.Course.end_at,
+      meeting_url: item.Course.meeting_url
+    }
+  }))
+
+  handleSuccess(res, 200, {
+    credit_usage,
+    credit_remain,
+    course_booking
+  })
+}
+
+module.exports = { signup, login, getProfile, editProfile, forgetPassword, getPurchaseCreditPackage, getEnrollCourse }
