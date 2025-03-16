@@ -16,8 +16,16 @@ const isCoach = require('../middlewares/isCoach')
 
 const handleErrorAsync = require('../utils/handleErrorAsync');
 
+router.get('/', isAuth, isCoach, handleErrorAsync(adminController.getCoachInformation))
+router.put('/', isAuth, isCoach, handleErrorAsync(adminController.editCoachInformation))
+
+router.get('/courses', isAuth, isCoach, handleErrorAsync(adminController.getCourse))
+router.get('/courses/:courseId', isAuth, isCoach, handleErrorAsync(adminController.getDetailCourse))
 router.post('/courses', isAuth, isCoach, handleErrorAsync(adminController.createCourse))
 router.put('/courses/:courseId', isAuth, isCoach, handleErrorAsync(adminController.editCourse))
-router.post('/:userId', isAuth, handleErrorAsync(adminController.changeRole))
+
+router.get('/revenue', isAuth, isCoach, handleErrorAsync(adminController.getCoachMonthlyIncome))
+
+router.post('/:userId', isAuth, handleErrorAsync(adminController.editRole))
 
 module.exports = router
